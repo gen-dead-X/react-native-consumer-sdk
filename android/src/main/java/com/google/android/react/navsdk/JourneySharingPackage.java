@@ -1,5 +1,5 @@
 /**
- * Copyright 2023 Google LLC
+ * Copyright 2025 Google LLC
  *
  * <p>Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
  * except in compliance with the License. You may obtain a copy of the License at
@@ -13,36 +13,28 @@
  */
 package com.google.android.react.navsdk;
 
-import com.facebook.proguard.annotations.DoNotStrip;
 import com.facebook.react.ReactPackage;
 import com.facebook.react.bridge.NativeModule;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.uimanager.ViewManager;
+
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
-@DoNotStrip
-public class Package implements ReactPackage {
-
-  private NavViewManager mNavViewManager;
-
+/**
+ * Package for registering JourneySharing modules with React Native
+ */
+public class JourneySharingPackage implements ReactPackage {
   @Override
   public List<ViewManager> createViewManagers(ReactApplicationContext reactContext) {
-    return Arrays.asList(NavViewManager.getInstance(reactContext));
+    return Collections.emptyList();
   }
 
   @Override
   public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
     List<NativeModule> modules = new ArrayList<>();
-    NavViewManager viewManager = NavViewManager.getInstance(reactContext);
-    modules.add(NavModule.getInstance(reactContext, viewManager));
-    modules.add(new NavAutoModule(reactContext));
-    modules.add(new NavViewModule(reactContext, viewManager));
-
-    // Add Journey Sharing module
     modules.add(new JourneySharingModule(reactContext));
-
     return modules;
   }
 }

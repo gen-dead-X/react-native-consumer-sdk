@@ -25,6 +25,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { View, Button, StyleSheet } from 'react-native';
 import NavigationScreen from './screens/NavigationScreen';
 import MultipleMapsScreen from './screens/MultipleMapsScreen';
+import { JourneySharingExample } from './screens/JourneySharingScreen';
 import {
   NavigationProvider,
   TaskRemovedBehavior,
@@ -36,6 +37,7 @@ export type ScreenNames = [
   'Home',
   'Navigation',
   'Multiple maps',
+  'Journey Sharing',
   'Integration tests',
 ];
 
@@ -60,6 +62,12 @@ const HomeScreen = () => {
         <Button
           title="Multiple Maps"
           onPress={() => isFocused && navigate('Multiple maps')}
+        />
+      </View>
+      <View style={styles.buttonContainer}>
+        <Button
+          title="Journey Sharing"
+          onPress={() => isFocused && navigate('Journey Sharing')}
         />
       </View>
       {/* Spacer */}
@@ -99,6 +107,10 @@ export default function App() {
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Navigation" component={NavigationScreen} />
           <Stack.Screen name="Multiple maps" component={MultipleMapsScreen} />
+          <Stack.Screen
+            name="Journey Sharing"
+            component={JourneySharingExample}
+          />
           <Stack.Screen
             name="Integration tests"
             component={IntegrationTestsScreen}
