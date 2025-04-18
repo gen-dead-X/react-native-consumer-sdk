@@ -23,6 +23,7 @@ import {
   type TripData,
   type TripWaypoint,
 } from '@googlemaps/react-native-navigation-sdk';
+import axios from 'axios';
 
 interface JourneySharingExampleProps {
   // Optional trip ID to track, if not provided, a UI will be shown to enter one
@@ -35,19 +36,17 @@ interface JourneySharingExampleProps {
 
 /**
  * Example component demonstrating how to use the Journey Sharing API
+ *
+ * @return {React.ReactElement} The rendered Journey Sharing Example component.
  */
 export const JourneySharingExample: React.FC<JourneySharingExampleProps> = ({
   tripId: initialTripId,
-  providerId: initialProviderId = 'test-provider-id',
-  providerToken: initialProviderToken,
+  providerId: initialProviderId = 'snap-e-odrd-mobility',
 }) => {
   const [tripId, setTripId] = useState<string>(initialTripId || '');
-  const [inputTripId, setInputTripId] = useState<string>('');
-  const [providerId, setProviderId] = useState<string>(initialProviderId);
-  const [providerToken, setProviderToken] = useState<string>(
-    initialProviderToken || ''
-  );
-  const [inputProviderToken, setInputProviderToken] = useState<string>('');
+  const [inputTripId, setInputTripId] = useState<string>('KOL9421744792966');
+  const [providerId] = useState<string>(initialProviderId);
+  const [providerToken, setProviderToken] = useState<string>('');
   const [isSessionActive, setIsSessionActive] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [eta, setEta] = useState<string>('');
@@ -191,16 +190,59 @@ export const JourneySharingExample: React.FC<JourneySharingExampleProps> = ({
     setTripId(inputTripId);
   }, [inputTripId]);
 
-  const onSetProviderToken = useCallback(() => {
-    setProviderToken(inputProviderToken);
-    journeySharingController.setProviderToken(inputProviderToken).catch(err => {
+  const onSetProviderToken = useCallback(async () => {
+    const token = await getAuthToken();
+
+    console.log({ token });
+
+    if (!token) {
+      setError('Failed to fetch auth token');
+      return;
+    }
+
+    setProviderToken(token);
+    journeySharingController.setProviderToken(token).catch(err => {
       console.error('Failed to set provider token:', err);
       setError(
         'Failed to set token: ' +
           (err instanceof Error ? err.message : String(err))
       );
     });
-  }, [inputProviderToken, journeySharingController]);
+  }, [journeySharingController]);
+
+  useEffect(() => {
+    console.log({ providerToken });
+  }, [providerToken]);
+
+  /**
+   * Fetches the authentication token for the provider.
+   * @return {Promise<string | false>} The authentication token or false if fetching fails.
+   */
+  async function getAuthToken() {
+    try {
+      const url = `https://api-dev.snapecab.com/v1/token/consumer?bookingId=KOL9421744792966`;
+
+      const headers = {
+        language: 'en',
+        platform: 2,
+      };
+
+      const response = await axios.get(url, { headers });
+
+      if (response.status !== 200) {
+        throw new Error('Failed to fetch auth token');
+      }
+
+      const data = response.data;
+
+      console.log(data.data.token);
+
+      return data.data.token; // Adjust based on your API response structure
+    } catch (fetchError) {
+      console.log(fetchError);
+      return false;
+    }
+  }
 
   return (
     <View style={styles.container}>
@@ -221,8 +263,8 @@ export const JourneySharingExample: React.FC<JourneySharingExampleProps> = ({
           <TextInput
             style={styles.input}
             placeholder="Enter Provider Token"
-            value={inputProviderToken}
-            onChangeText={setInputProviderToken}
+            value={providerToken}
+            onChangeText={setProviderToken}
           />
           <Button title="Set" onPress={onSetProviderToken} />
         </View>
