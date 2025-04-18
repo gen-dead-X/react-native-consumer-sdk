@@ -23,12 +23,12 @@ import {
 } from 'react-native';
 
 import {
-  JourneySharingController,
-  JourneySharingListeners,
+  type JourneySharingController,
+  type JourneySharingListeners,
   TripStatus,
-  TripInfo,
-  VehicleLocation,
-  TripWaypoint,
+  type TripInfo,
+  type VehicleLocation,
+  type TripWaypoint,
 } from './types';
 
 const { JourneySharingModule } = NativeModules;

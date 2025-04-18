@@ -1,55 +1,43 @@
-/**
- * Copyright 2025 Google LLC
- *
- * <p>Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- *
- * <p>http://www.apache.org/licenses/LICENSE-2.0
- *
- * <p>Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.google.android.react.navsdk;
 
-import android.location.Location;
+import android.app.Activity;
 import android.util.Log;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.facebook.react.bridge.Arguments;
-import com.facebook.react.bridge.CatalystInstance;
-import com.facebook.react.bridge.NativeArray;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
-import com.facebook.react.bridge.ReactContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
-import com.facebook.react.bridge.UiThreadUtil;
-import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
-import com.facebook.react.bridge.WritableNativeArray;
 import com.facebook.react.module.annotations.ReactModule;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
+import com.google.android.gms.maps.CameraUpdateFactory;
+import com.google.android.gms.maps.model.LatLng;
+import com.google.android.libraries.mapsplatform.transportation.consumer.auth.AuthTokenContext;
+import com.google.android.libraries.mapsplatform.transportation.consumer.auth.AuthTokenFactory;
+import com.google.android.libraries.mapsplatform.transportation.consumer.ConsumerApi;
+import com.google.android.libraries.mapsplatform.transportation.consumer.managers.TripModel;
+import com.google.android.libraries.mapsplatform.transportation.consumer.managers.TripModelManager;
+import com.google.android.libraries.mapsplatform.transportation.consumer.sessions.JourneySharingSession;
+import com.google.android.libraries.mapsplatform.transportation.consumer.view.ConsumerController;
+import com.google.android.libraries.mapsplatform.transportation.consumer.view.ConsumerGoogleMap;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
-/**
- * JourneySharingModule provides React Native interface to journey sharing functionality
- * for use in consumer applications. This allows tracking trips with Fleet Engine.
- * Note: This is a basic implementation with simulated/mock data for demonstration purposes.
- */
 @ReactModule(name = JourneySharingModule.NAME)
 public class JourneySharingModule extends ReactContextBaseJavaModule {
   public static final String NAME = "JourneySharingModule";
   private static final String TAG = "JourneySharingModule";
+  private static final float DEFAULT_ZOOM = 15.0f;
 
   private final ReactApplicationContext reactContext;
   private String providerId;
@@ -57,164 +45,16 @@ public class JourneySharingModule extends ReactContextBaseJavaModule {
   private String tripId;
   private boolean isSessionActive = false;
 
-  // For development purposes, we'll use a simulated trip
-  private SimulatedTrip simulatedTrip;
+  // Fleet Engine SDK components
+  private ConsumerApi consumerApi;
+  private TripModelManager tripModelManager;
+  private final Executor executor = Executors.newSingleThreadExecutor();
 
-  // Core journey sharing data structures
-  private static class LatLng {
-    public double lat;
-    public double lng;
-
-    public LatLng(double lat, double lng) {
-      this.lat = lat;
-      this.lng = lng;
-    }
-  }
-
-  public static class TripWaypoint {
-    public String id;
-    public LatLng location;
-    public int waypointType; // 0=pickup, 1=dropoff, 2=intermediate
-    public String tripId;
-    public String title;
-
-    public TripWaypoint(LatLng location, int waypointType, String tripId, String title) {
-      this.id = UUID.randomUUID().toString();
-      this.location = location;
-      this.waypointType = waypointType;
-      this.tripId = tripId;
-      this.title = title;
-    }
-  }
-
-  public static class TripData {
-    public String tripName;
-    public int tripStatus; // 0=NEW, 1=ENROUTE_TO_PICKUP, 2=ARRIVED_AT_PICKUP, 3=ENROUTE_TO_DROPOFF, 4=COMPLETED, 5=CANCELED
-    public List<TripWaypoint> remainingWaypoints;
-    public String vehicleTypeId;
-    public String bookingId;
-
-    public TripData(String tripName, int tripStatus, List<TripWaypoint> remainingWaypoints,
-                   String vehicleTypeId, String bookingId) {
-      this.tripName = tripName;
-      this.tripStatus = tripStatus;
-      this.remainingWaypoints = remainingWaypoints;
-      this.vehicleTypeId = vehicleTypeId;
-      this.bookingId = bookingId;
-    }
-  }
-
-  private static class VehicleLocation {
-    public LatLng location;
-    public double heading;
-    public long timestamp;
-
-    public VehicleLocation(LatLng location, double heading, long timestamp) {
-      this.location = location;
-      this.heading = heading;
-      this.timestamp = timestamp;
-    }
-  }
-
-  private static class SimulatedTrip {
-    public TripData tripData;
-    public VehicleLocation vehicleLocation;
-    public int currentStatus;
-    public int currentWaypointIndex = 0;
-    public long etaTimestampMillis;
-    public double remainingDistanceMeters;
-
-    public SimulatedTrip(TripData tripData) {
-      this.tripData = tripData;
-      this.currentStatus = tripData.tripStatus;
-
-      // Initially, set vehicle at first waypoint
-      TripWaypoint firstWaypoint = tripData.remainingWaypoints.get(0);
-      this.vehicleLocation = new VehicleLocation(
-          firstWaypoint.location, 0, System.currentTimeMillis());
-
-      // Set initial remaining distance and ETA
-      this.remainingDistanceMeters = 2500; // 2.5 km
-      this.etaTimestampMillis = System.currentTimeMillis() + (15 * 60 * 1000); // 15 minutes from now
-    }
-
-    // Move the vehicle along simulated path
-    public void updateVehicleLocation() {
-      if (currentStatus == 4 || currentStatus == 5) { // COMPLETED or CANCELED
-        return;
-      }
-
-      // Decrease remaining distance
-      remainingDistanceMeters = Math.max(0, remainingDistanceMeters - 50);
-
-      // Update ETA - get closer as we approach
-      long currentTime = System.currentTimeMillis();
-      long remainingTime = Math.max(60000, etaTimestampMillis - currentTime); // at least 1 minute
-      etaTimestampMillis = currentTime + (long)(remainingTime * 0.95); // reduce by 5%
-
-      // Update vehicle location - move closer to next waypoint
-      if (currentWaypointIndex < tripData.remainingWaypoints.size()) {
-        TripWaypoint targetWaypoint = tripData.remainingWaypoints.get(currentWaypointIndex);
-
-        // Move toward the target waypoint
-        LatLng currentLoc = vehicleLocation.location;
-        LatLng targetLoc = targetWaypoint.location;
-
-        // Simple linear interpolation toward target
-        double moveFactor = 0.05; // Move 5% closer each update
-        double newLat = currentLoc.lat + (targetLoc.lat - currentLoc.lat) * moveFactor;
-        double newLng = currentLoc.lng + (targetLoc.lng - currentLoc.lng) * moveFactor;
-
-        // Calculate heading (direction) - simplified
-        double heading = Math.atan2(targetLoc.lng - currentLoc.lng, targetLoc.lat - currentLoc.lat) * 180 / Math.PI;
-        if (heading < 0) heading += 360;
-
-        // Update vehicle location
-        vehicleLocation = new VehicleLocation(
-            new LatLng(newLat, newLng), heading, System.currentTimeMillis());
-
-        // Check if we've arrived at the waypoint
-        double distance = Math.sqrt(
-            Math.pow(newLat - targetLoc.lat, 2) +
-            Math.pow(newLng - targetLoc.lng, 2));
-
-        if (distance < 0.0002) { // Approximately 20 meters
-          // We've arrived at the waypoint
-          if (targetWaypoint.waypointType == 0) { // PICKUP
-            currentStatus = 2; // ARRIVED_AT_PICKUP
-
-            // After a short delay, update status to ENROUTE_TO_DROPOFF and move to next waypoint
-            if (remainingDistanceMeters < 100) {
-              currentStatus = 3; // ENROUTE_TO_DROPOFF
-              currentWaypointIndex++;
-
-              // Reset distance/ETA for next leg
-              if (currentWaypointIndex < tripData.remainingWaypoints.size()) {
-                remainingDistanceMeters = 3000; // 3 km to next waypoint
-                etaTimestampMillis = System.currentTimeMillis() + (20 * 60 * 1000); // 20 min
-              }
-            }
-          } else if (targetWaypoint.waypointType == 1) { // DROPOFF
-            // We've arrived at the final destination
-            currentStatus = 4; // COMPLETED
-            remainingDistanceMeters = 0;
-          } else { // INTERMEDIATE
-            // Move to next waypoint
-            currentWaypointIndex++;
-
-            // Reset distance/ETA for next leg
-            if (currentWaypointIndex < tripData.remainingWaypoints.size()) {
-              remainingDistanceMeters = 2000; // 2 km to next waypoint
-              etaTimestampMillis = System.currentTimeMillis() + (10 * 60 * 1000); // 10 min
-            }
-          }
-        }
-      }
-
-      // Update trip data status to match current status
-      tripData.tripStatus = currentStatus;
-    }
-  }
+  // Journey sharing components
+  private ConsumerGoogleMap consumerGoogleMap;
+  private ConsumerController consumerController;
+  private JourneySharingSession journeySharingSession;
+  private FrameLayout mapContainer;
 
   public JourneySharingModule(ReactApplicationContext reactContext) {
     super(reactContext);
@@ -228,35 +68,102 @@ public class JourneySharingModule extends ReactContextBaseJavaModule {
   }
 
   /**
-   * Initialize the journey sharing module with provider ID and optional token
+   * Initialize the journey sharing module with provider credentials
    */
   @ReactMethod
-  public void init(String providerId, @Nullable String providerToken, final Promise promise) {
+  public void initialize(String providerId, @Nullable String providerToken, final Promise promise) {
     Log.d(TAG, "Initializing JourneySharing with providerId: " + providerId);
 
     this.providerId = providerId;
     this.providerToken = providerToken;
 
-    // In a real implementation, we would initialize the Fleet Engine SDK here
-    // For now, we'll just simulate successful initialization
+    try {
+      // Initialize ConsumerApi with provider ID and token
+      ConsumerApi.initialize(
+        getCurrentActivity(),
+        providerId,
+        new AuthTokenFactory() {
+          @Override
+          public String getToken(AuthTokenContext context) {
+            return providerToken;
+          }
+        }
+      ).addOnSuccessListener(api -> {
+        consumerApi = api;
+        tripModelManager = consumerApi.getTripModelManager();
+        Log.d(TAG, "Fleet Engine Consumer API initialized successfully");
+        promise.resolve(true);
+      }).addOnFailureListener(e -> {
+        Log.e(TAG, "Error initializing Fleet Engine Consumer API", e);
+        promise.reject("INIT_ERROR", "Failed to initialize Fleet Engine: " + e.getMessage());
+      });
+    } catch (Exception e) {
+      Log.e(TAG, "Error initializing Fleet Engine Consumer API", e);
+      promise.reject("INIT_ERROR", "Failed to initialize Fleet Engine: " + e.getMessage());
+    }
+  }
 
-    // Return success
+  /**
+   * Update the provider token
+   */
+  @ReactMethod
+  public void updateProviderToken(String token, final Promise promise) {
+    Log.d(TAG, "Updating provider token");
+    this.providerToken = token;
     promise.resolve(true);
   }
 
   /**
-   * Set or update the provider token
+   * Set up the map view in the provided container ID
    */
   @ReactMethod
-  public void setProviderToken(String token, final Promise promise) {
-    Log.d(TAG, "Setting provider token");
+  public void setupMapView(final int containerId, final Promise promise) {
+    final Activity activity = getCurrentActivity();
+    if (activity == null) {
+      promise.reject("ACTIVITY_ERROR", "Current activity is null");
+      return;
+    }
 
-    this.providerToken = token;
+    activity.runOnUiThread(() -> {
+      try {
+        // Find the container view by ID
+        View rootView = activity.findViewById(android.R.id.content);
+        View containerView = findViewByReactId(rootView, containerId);
 
-    // In a real implementation, we would update the token in the Fleet Engine SDK
+        if (containerView instanceof ViewGroup) {
+          mapContainer = new FrameLayout(activity);
+          ((ViewGroup) containerView).addView(mapContainer);
 
-    // Return success
-    promise.resolve(true);
+          // Initialize the map
+          initializeConsumerMap(promise);
+        } else {
+          promise.reject("CONTAINER_ERROR", "Container view not found or not a ViewGroup");
+        }
+      } catch (Exception e) {
+        Log.e(TAG, "Error setting up map view", e);
+        promise.reject("SETUP_ERROR", "Failed to set up map view: " + e.getMessage());
+      }
+    });
+  }
+
+  private void initializeConsumerMap(final Promise promise) {
+    if (mapContainer == null) {
+      promise.reject("CONTAINER_ERROR", "Map container is null");
+      return;
+    }
+
+    // Use the correct method signature based on the SDK version
+    ConsumerGoogleMap.create(
+      getCurrentActivity(),
+      null,
+      mapContainer,
+      map -> {
+        consumerGoogleMap = map;
+        consumerController = map.getConsumerController();
+        Log.d(TAG, "Consumer map ready");
+        promise.resolve(true);
+      }
+    );
   }
 
   /**
@@ -271,91 +178,36 @@ public class JourneySharingModule extends ReactContextBaseJavaModule {
       return;
     }
 
+    if (consumerApi == null || tripModelManager == null || consumerController == null) {
+      promise.reject("NOT_INITIALIZED", "Fleet Engine Consumer API or map not initialized");
+      return;
+    }
+
     try {
-      // Parse trip data from JavaScript
+      // Extract trip data from JS object
       String tripName = tripDataMap.getString("tripName");
-      this.tripId = tripName; // Use tripName as tripId for simplicity
+      int tripStatus = tripDataMap.getInt("tripStatus");
+      this.tripId = tripName;
 
-      // Handle tripStatus value more robustly
-      int tripStatus;
-      try {
-        // First try to get it as an integer
-        tripStatus = tripDataMap.getInt("tripStatus");
-      } catch (Exception e) {
-        try {
-          // If that fails, try to parse it from a string
-          String tripStatusStr = tripDataMap.getString("tripStatus");
-          tripStatus = Integer.parseInt(tripStatusStr);
-        } catch (Exception e2) {
-          // Default to NEW (0) if we can't parse it
-          Log.w(TAG, "Could not parse tripStatus, defaulting to NEW (0)", e2);
-          tripStatus = 0;
-        }
+      // Get or create trip model
+      TripModel tripModel = tripModelManager.getTripModel(tripName);
+
+      // Create and start journey sharing session
+      journeySharingSession = JourneySharingSession.createInstance(tripModel);
+      if (journeySharingSession != null) {
+        consumerController.showSession(journeySharingSession);
+        isSessionActive = true;
+
+        // Send status update event to React Native
+        WritableMap params = Arguments.createMap();
+        params.putString("tripId", tripName);
+        params.putBoolean("isActive", true);
+        sendEvent("journeySharingStatusChanged", params);
+
+        promise.resolve(true);
+      } else {
+        promise.reject("SESSION_ERROR", "Failed to create journey sharing session");
       }
-
-      String vehicleTypeId = tripDataMap.hasKey("vehicleTypeId") ?
-          tripDataMap.getString("vehicleTypeId") : "default";
-      String bookingId = tripDataMap.hasKey("bookingId") ?
-          tripDataMap.getString("bookingId") : tripName;
-
-      // Parse waypoints
-      List<TripWaypoint> waypoints = new ArrayList<>();
-      if (tripDataMap.hasKey("remainingWaypoints")) {
-        ReadableArray waypointsArray = tripDataMap.getArray("remainingWaypoints");
-        for (int i = 0; i < waypointsArray.size(); i++) {
-          ReadableMap waypointMap = waypointsArray.getMap(i);
-
-          // Get location
-          ReadableMap locationMap = waypointMap.getMap("location");
-          double lat = locationMap.getDouble("lat");
-          double lng = locationMap.getDouble("lng");
-          LatLng location = new LatLng(lat, lng);
-
-          // Get waypoint type - handle either int or string
-          int waypointType;
-          try {
-            waypointType = waypointMap.getInt("waypointType");
-          } catch (Exception e) {
-            try {
-              String typeStr = waypointMap.getString("waypointType");
-              waypointType = Integer.parseInt(typeStr);
-            } catch (Exception e2) {
-              // Default to PICKUP (0)
-              Log.w(TAG, "Could not parse waypointType, defaulting to PICKUP (0)", e2);
-              waypointType = 0;
-            }
-          }
-
-          // Get trip ID (default to parent trip ID if not provided)
-          String waypointTripId = waypointMap.hasKey("tripId") ?
-              waypointMap.getString("tripId") : tripName;
-
-          // Get title (default to type-based title if not provided)
-          String title = waypointMap.hasKey("title") ?
-              waypointMap.getString("title") :
-              (waypointType == 0 ? "Pickup" : waypointType == 1 ? "Dropoff" : "Stop");
-
-          // Create and add waypoint
-          TripWaypoint waypoint = new TripWaypoint(location, waypointType, waypointTripId, title);
-          waypoints.add(waypoint);
-        }
-      }
-
-      // Create trip data object
-      TripData tripData = new TripData(tripName, tripStatus, waypoints, vehicleTypeId, bookingId);
-
-      // In a real implementation, we would call Fleet Engine SDK here
-      // For now, create a simulated trip for demonstration
-      this.simulatedTrip = new SimulatedTrip(tripData);
-
-      // Mark session as active
-      isSessionActive = true;
-
-      // Start periodic updates for simulation
-      startPeriodicUpdates();
-
-      // Return success
-      promise.resolve(true);
     } catch (Exception e) {
       Log.e(TAG, "Error starting journey sharing", e);
       promise.reject("START_ERROR", "Failed to start journey sharing: " + e.getMessage());
@@ -374,165 +226,112 @@ public class JourneySharingModule extends ReactContextBaseJavaModule {
       return;
     }
 
-    // In a real implementation, we would call Fleet Engine SDK to stop journey sharing
+    try {
+      if (journeySharingSession != null) {
+        journeySharingSession.stop();
+        journeySharingSession = null;
+      }
 
-    // Stop simulation
-    isSessionActive = false;
-    simulatedTrip = null;
+      if (consumerController != null) {
+        consumerController.hideAllSessions();
+      }
 
-    // Return success
-    promise.resolve(true);
+      isSessionActive = false;
+
+      // Send status update event to React Native
+      WritableMap params = Arguments.createMap();
+      params.putString("tripId", tripId);
+      params.putBoolean("isActive", false);
+      sendEvent("journeySharingStatusChanged", params);
+
+      promise.resolve(true);
+    } catch (Exception e) {
+      Log.e(TAG, "Error stopping journey sharing", e);
+      promise.reject("STOP_ERROR", "Failed to stop journey sharing: " + e.getMessage());
+    }
   }
 
   /**
-   * Clean up resources
+   * Update current location for the journey sharing map
    */
   @ReactMethod
-  public void cleanup(final Promise promise) {
-    Log.d(TAG, "Cleaning up journey sharing");
+  public void updateCurrentLocation(ReadableMap locationMap, final Promise promise) {
+    try {
+      if (consumerGoogleMap != null) {
+        double latitude = locationMap.getDouble("latitude");
+        double longitude = locationMap.getDouble("longitude");
 
-    // Stop journey sharing if active
+        LatLng latLng = new LatLng(latitude, longitude);
+        consumerGoogleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(latLng, DEFAULT_ZOOM));
+        promise.resolve(true);
+      } else {
+        promise.reject("MAP_ERROR", "Consumer map is not initialized");
+      }
+    } catch (Exception e) {
+      Log.e(TAG, "Error updating location", e);
+      promise.reject("LOCATION_ERROR", "Failed to update location: " + e.getMessage());
+    }
+  }
+
+  /**
+   * Find out if the journey sharing is currently active
+   */
+  @ReactMethod
+  public void isJourneySharingActive(final Promise promise) {
+    promise.resolve(isSessionActive);
+  }
+
+  /**
+   * Send an event to React Native
+   */
+  private void sendEvent(String eventName, @Nullable WritableMap params) {
+    reactContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+      .emit(eventName, params);
+  }
+
+  /**
+   * Helper method to find a view by its React ID
+   */
+  private View findViewByReactId(View view, int reactId) {
+    if (view.getId() == reactId) {
+      return view;
+    }
+
+    if (view instanceof ViewGroup) {
+      ViewGroup viewGroup = (ViewGroup) view;
+      for (int i = 0; i < viewGroup.getChildCount(); i++) {
+        View child = findViewByReactId(viewGroup.getChildAt(i), reactId);
+        if (child != null) {
+          return child;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Clean up resources when the module is destroyed
+   */
+  @Override
+  public void invalidate() {
     if (isSessionActive) {
-      isSessionActive = false;
-      simulatedTrip = null;
-    }
-
-    // In a real implementation, we would clean up Fleet Engine SDK resources
-
-    // Return success
-    promise.resolve(true);
-  }
-
-  // For simulation only: start periodic updates
-  private void startPeriodicUpdates() {
-    new Thread(() -> {
-      while (isSessionActive && simulatedTrip != null) {
-        try {
-          // Update simulated trip
-          simulatedTrip.updateVehicleLocation();
-
-          // Send updates
-          sendTripStatusUpdate();
-          sendVehicleLocationUpdate();
-          sendETAUpdate();
-          sendDistanceUpdate();
-
-          // Wait before next update
-          Thread.sleep(2000); // Update every 2 seconds
-        } catch (InterruptedException e) {
-          Log.e(TAG, "Simulation interrupted", e);
-          break;
-        } catch (Exception e) {
-          Log.e(TAG, "Error in simulation", e);
+      try {
+        if (journeySharingSession != null) {
+          journeySharingSession.stop();
+          journeySharingSession = null;
         }
-      }
-    }).start();
-  }
 
-  // Send trip status update to React Native
-  private void sendTripStatusUpdate() {
-    if (!isSessionActive || simulatedTrip == null) return;
-
-    WritableMap tripInfo = createTripInfoMap();
-    int status = simulatedTrip.currentStatus;
-
-    WritableNativeArray params = new WritableNativeArray();
-    params.pushMap(tripInfo);
-    params.pushInt(status);
-
-    sendCommandToReactNative("onTripStatusUpdated", params);
-  }
-
-  // Send vehicle location update to React Native
-  private void sendVehicleLocationUpdate() {
-    if (!isSessionActive || simulatedTrip == null) return;
-
-    WritableMap tripInfo = createTripInfoMap();
-    WritableMap locationMap = Arguments.createMap();
-
-    VehicleLocation vehicle = simulatedTrip.vehicleLocation;
-    locationMap.putDouble("latitude", vehicle.location.lat);
-    locationMap.putDouble("longitude", vehicle.location.lng);
-    locationMap.putDouble("heading", vehicle.heading);
-    locationMap.putDouble("timestamp", vehicle.timestamp);
-
-    WritableNativeArray params = new WritableNativeArray();
-    params.pushMap(tripInfo);
-    params.pushMap(locationMap);
-
-    sendCommandToReactNative("onTripVehicleLocationUpdated", params);
-  }
-
-  // Send ETA update to React Native
-  private void sendETAUpdate() {
-    if (!isSessionActive || simulatedTrip == null) return;
-
-    WritableMap tripInfo = createTripInfoMap();
-    long etaTimestamp = simulatedTrip.etaTimestampMillis;
-
-    WritableNativeArray params = new WritableNativeArray();
-    params.pushMap(tripInfo);
-    params.pushDouble(etaTimestamp);
-
-    sendCommandToReactNative("onTripETAToNextWaypointUpdated", params);
-  }
-
-  // Send distance update to React Native
-  private void sendDistanceUpdate() {
-    if (!isSessionActive || simulatedTrip == null) return;
-
-    WritableMap tripInfo = createTripInfoMap();
-    double distance = simulatedTrip.remainingDistanceMeters;
-
-    WritableNativeArray params = new WritableNativeArray();
-    params.pushMap(tripInfo);
-    params.pushDouble(distance);
-
-    sendCommandToReactNative("onTripActiveRouteRemainingDistanceUpdated", params);
-  }
-
-  // Create trip info map for events
-  private WritableMap createTripInfoMap() {
-    WritableMap tripInfo = Arguments.createMap();
-
-    if (simulatedTrip != null) {
-      TripData tripData = simulatedTrip.tripData;
-      tripInfo.putString("tripId", tripData.tripName);
-      tripInfo.putInt("tripStatus", tripData.tripStatus);
-
-      // Add waypoints
-      if (tripData.remainingWaypoints != null && !tripData.remainingWaypoints.isEmpty()) {
-        WritableArray waypointsArray = Arguments.createArray();
-        for (TripWaypoint waypoint : tripData.remainingWaypoints) {
-          WritableMap waypointMap = Arguments.createMap();
-          waypointMap.putString("id", waypoint.id);
-
-          WritableMap locationMap = Arguments.createMap();
-          locationMap.putDouble("lat", waypoint.location.lat);
-          locationMap.putDouble("lng", waypoint.location.lng);
-          waypointMap.putMap("location", locationMap);
-
-          waypointMap.putInt("waypointType", waypoint.waypointType);
-          waypointMap.putString("tripId", waypoint.tripId);
-          waypointMap.putString("title", waypoint.title);
-
-          waypointsArray.pushMap(waypointMap);
+        if (consumerController != null) {
+          consumerController.hideAllSessions();
         }
-        tripInfo.putArray("remainingWaypoints", waypointsArray);
+
+        isSessionActive = false;
+      } catch (Exception e) {
+        Log.e(TAG, "Error cleaning up journey sharing", e);
       }
     }
-
-    return tripInfo;
-  }
-
-  // Send command to React Native
-  private void sendCommandToReactNative(String functionName, NativeArray params) {
-    ReactContext reactContext = getReactApplicationContext();
-
-    if (reactContext != null) {
-      // Use DeviceEventEmitter instead of trying to call into JS module directly
-      reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-        .emit(functionName, params);
-    }
+    super.invalidate();
   }
 }
