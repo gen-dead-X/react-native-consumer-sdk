@@ -33,6 +33,7 @@ import com.facebook.react.bridge.WritableArray;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.WritableNativeArray;
 import com.facebook.react.module.annotations.ReactModule;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -275,7 +276,23 @@ public class JourneySharingModule extends ReactContextBaseJavaModule {
       String tripName = tripDataMap.getString("tripName");
       this.tripId = tripName; // Use tripName as tripId for simplicity
 
-      int tripStatus = tripDataMap.getInt("tripStatus");
+      // Handle tripStatus value more robustly
+      int tripStatus;
+      try {
+        // First try to get it as an integer
+        tripStatus = tripDataMap.getInt("tripStatus");
+      } catch (Exception e) {
+        try {
+          // If that fails, try to parse it from a string
+          String tripStatusStr = tripDataMap.getString("tripStatus");
+          tripStatus = Integer.parseInt(tripStatusStr);
+        } catch (Exception e2) {
+          // Default to NEW (0) if we can't parse it
+          Log.w(TAG, "Could not parse tripStatus, defaulting to NEW (0)", e2);
+          tripStatus = 0;
+        }
+      }
+
       String vehicleTypeId = tripDataMap.hasKey("vehicleTypeId") ?
           tripDataMap.getString("vehicleTypeId") : "default";
       String bookingId = tripDataMap.hasKey("bookingId") ?
@@ -294,9 +311,20 @@ public class JourneySharingModule extends ReactContextBaseJavaModule {
           double lng = locationMap.getDouble("lng");
           LatLng location = new LatLng(lat, lng);
 
-          // Get waypoint type (default to PICKUP if not provided)
-          int waypointType = waypointMap.hasKey("waypointType") ?
-              waypointMap.getInt("waypointType") : 0;
+          // Get waypoint type - handle either int or string
+          int waypointType;
+          try {
+            waypointType = waypointMap.getInt("waypointType");
+          } catch (Exception e) {
+            try {
+              String typeStr = waypointMap.getString("waypointType");
+              waypointType = Integer.parseInt(typeStr);
+            } catch (Exception e2) {
+              // Default to PICKUP (0)
+              Log.w(TAG, "Could not parse waypointType, defaulting to PICKUP (0)", e2);
+              waypointType = 0;
+            }
+          }
 
           // Get trip ID (default to parent trip ID if not provided)
           String waypointTripId = waypointMap.hasKey("tripId") ?
@@ -502,8 +530,9 @@ public class JourneySharingModule extends ReactContextBaseJavaModule {
     ReactContext reactContext = getReactApplicationContext();
 
     if (reactContext != null) {
-      CatalystInstance catalystInstance = reactContext.getCatalystInstance();
-      catalystInstance.callFunction("JourneySharingModule", functionName, params);
+      // Use DeviceEventEmitter instead of trying to call into JS module directly
+      reactContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+        .emit(functionName, params);
     }
   }
 }

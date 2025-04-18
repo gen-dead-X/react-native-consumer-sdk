@@ -15,7 +15,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { NativeModules, NativeEventEmitter } from 'react-native';
+import {
+  NativeModules,
+  NativeEventEmitter,
+  DeviceEventEmitter,
+  Platform,
+} from 'react-native';
 
 import {
   JourneySharingController,
@@ -28,6 +33,55 @@ import {
 
 const { JourneySharingModule } = NativeModules;
 const journeySharingEventEmitter = new NativeEventEmitter(JourneySharingModule);
+
+// Create JS module that native code can call into
+if (Platform.OS === 'android') {
+  // Register JavaScript module to receive callbacks from native code
+  const JourneySharingModuleCallbacks = {
+    onTripStatusUpdated: (tripInfo: TripInfo, status: TripStatus) => {
+      DeviceEventEmitter.emit('onTripStatusUpdated', [tripInfo, status]);
+    },
+    onTripETAToNextWaypointUpdated: (
+      tripInfo: TripInfo,
+      timestampMillis: number
+    ) => {
+      DeviceEventEmitter.emit('onTripETAToNextWaypointUpdated', [
+        tripInfo,
+        timestampMillis,
+      ]);
+    },
+    onTripVehicleLocationUpdated: (
+      tripInfo: TripInfo,
+      vehicleLocation: VehicleLocation
+    ) => {
+      DeviceEventEmitter.emit('onTripVehicleLocationUpdated', [
+        tripInfo,
+        vehicleLocation,
+      ]);
+    },
+    onTripRemainingWaypointsUpdated: (
+      tripInfo: TripInfo,
+      waypointList: TripWaypoint[]
+    ) => {
+      DeviceEventEmitter.emit('onTripRemainingWaypointsUpdated', [
+        tripInfo,
+        waypointList,
+      ]);
+    },
+    onTripActiveRouteRemainingDistanceUpdated: (
+      tripInfo: TripInfo,
+      distanceMeters: number
+    ) => {
+      DeviceEventEmitter.emit('onTripActiveRouteRemainingDistanceUpdated', [
+        tripInfo,
+        distanceMeters,
+      ]);
+    },
+  };
+
+  // Register the JS module
+  (global as any).JourneySharingModule = JourneySharingModuleCallbacks;
+}
 
 /**
  * Hook to provide journey sharing functionality
@@ -121,8 +175,14 @@ export const useJourneySharing = () => {
 
   // Set up native event listeners
   useEffect(() => {
+    // For Android, we need to use DeviceEventEmitter for callbacks from native to JS
+    const emitter =
+      Platform.OS === 'android'
+        ? DeviceEventEmitter
+        : journeySharingEventEmitter;
+
     // Trip status updated
-    const statusSubscription = journeySharingEventEmitter.addListener(
+    const statusSubscription = emitter.addListener(
       'onTripStatusUpdated',
       ([tripInfo, status]) => {
         if (activeListeners.onTripStatusUpdated) {
@@ -132,7 +192,7 @@ export const useJourneySharing = () => {
     );
 
     // ETA updated
-    const etaSubscription = journeySharingEventEmitter.addListener(
+    const etaSubscription = emitter.addListener(
       'onTripETAToNextWaypointUpdated',
       ([tripInfo, timestampMillis]) => {
         if (activeListeners.onTripETAToNextWaypointUpdated) {
@@ -145,7 +205,7 @@ export const useJourneySharing = () => {
     );
 
     // Vehicle location updated
-    const locationSubscription = journeySharingEventEmitter.addListener(
+    const locationSubscription = emitter.addListener(
       'onTripVehicleLocationUpdated',
       ([tripInfo, vehicleLocation]) => {
         if (activeListeners.onTripVehicleLocationUpdated) {
@@ -158,7 +218,7 @@ export const useJourneySharing = () => {
     );
 
     // Waypoints updated
-    const waypointsSubscription = journeySharingEventEmitter.addListener(
+    const waypointsSubscription = emitter.addListener(
       'onTripRemainingWaypointsUpdated',
       ([tripInfo, waypointList]) => {
         if (activeListeners.onTripRemainingWaypointsUpdated) {
@@ -171,7 +231,7 @@ export const useJourneySharing = () => {
     );
 
     // Remaining distance updated
-    const distanceSubscription = journeySharingEventEmitter.addListener(
+    const distanceSubscription = emitter.addListener(
       'onTripActiveRouteRemainingDistanceUpdated',
       ([tripInfo, distanceMeters]) => {
         if (activeListeners.onTripActiveRouteRemainingDistanceUpdated) {

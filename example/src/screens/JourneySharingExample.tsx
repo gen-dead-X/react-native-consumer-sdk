@@ -74,7 +74,7 @@ const JourneySharingExample = () => {
       // Example trip data
       const tripData = {
         tripName: `trip-${Date.now()}`,
-        tripStatus: TripStatus.NEW,
+        tripStatus: 0, // Use numeric value instead of enum: TripStatus.NEW = 0
         remainingWaypoints: [
           {
             location: { lat: 37.422, lng: -122.084 },

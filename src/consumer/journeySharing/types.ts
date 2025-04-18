@@ -58,7 +58,7 @@ export interface TripInfo {
 
 export interface TripData {
   tripName: string;
-  tripStatus: TripStatus | string;
+  tripStatus: number; // Changed from TripStatus | string to number for consistent handling
   remainingWaypoints: TripWaypoint[];
   vehicleTypeId?: string;
   bookingId?: string;
