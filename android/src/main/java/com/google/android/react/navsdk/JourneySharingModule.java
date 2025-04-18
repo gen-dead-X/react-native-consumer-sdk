@@ -8,6 +8,7 @@ import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.fragment.app.FragmentActivity;
 
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.Promise;
@@ -19,6 +20,8 @@ import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.module.annotations.ReactModule;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
+import com.facebook.react.uimanager.ViewManager;
+import com.facebook.react.ReactPackage;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.libraries.mapsplatform.transportation.consumer.auth.AuthTokenContext;
@@ -29,7 +32,9 @@ import com.google.android.libraries.mapsplatform.transportation.consumer.manager
 import com.google.android.libraries.mapsplatform.transportation.consumer.sessions.JourneySharingSession;
 import com.google.android.libraries.mapsplatform.transportation.consumer.view.ConsumerController;
 import com.google.android.libraries.mapsplatform.transportation.consumer.view.ConsumerGoogleMap;
+import com.google.android.libraries.mapsplatform.transportation.consumer.view.ConsumerMapView;
 
+import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
@@ -146,24 +151,98 @@ public class JourneySharingModule extends ReactContextBaseJavaModule {
     });
   }
 
+  private ConsumerController getConsumerController() {
+    ConsumerMapViewManager viewManager = null;
+
+    // Get the package from the ReactContext
+    JourneySharingPackage journeySharingPackage = null;
+    for (Object packageObj : reactContext.getCatalystInstance().getNativeModules()) {
+      if (packageObj instanceof JourneySharingPackage) {
+        journeySharingPackage = (JourneySharingPackage) packageObj;
+        break;
+      }
+    }
+
+    if (journeySharingPackage != null) {
+      List<ViewManager> viewManagers = journeySharingPackage.createViewManagers(reactContext);
+
+      for (ViewManager manager : viewManagers) {
+        if (manager instanceof ConsumerMapViewManager) {
+          viewManager = (ConsumerMapViewManager) manager;
+          break;
+        }
+      }
+    }
+
+    if (viewManager != null) {
+      return viewManager.getConsumerController();
+    }
+
+    return null;
+  }
+
+  /**
+   * Start journey sharing with a view reference
+   */
+  @ReactMethod
+  public void startJourneySharingWithView(int reactViewId, ReadableMap tripDataMap, final Promise promise) {
+    consumerController = getConsumerController();
+    if (consumerController == null) {
+      promise.reject("CONTROLLER_ERROR", "Could not get consumer controller");
+      return;
+    }
+
+    // Now use the existing startJourneySharing implementation
+    startJourneySharing(tripDataMap, promise);
+  }
+
   private void initializeConsumerMap(final Promise promise) {
     if (mapContainer == null) {
       promise.reject("CONTAINER_ERROR", "Map container is null");
       return;
     }
 
-    // Use the correct method signature based on the SDK version
-    ConsumerGoogleMap.create(
-      getCurrentActivity(),
-      null,
-      mapContainer,
-      map -> {
-        consumerGoogleMap = map;
-        consumerController = map.getConsumerController();
-        Log.d(TAG, "Consumer map ready");
-        promise.resolve(true);
+    Activity activity = getCurrentActivity();
+    if (activity == null) {
+      promise.reject("ACTIVITY_ERROR", "Activity is null");
+      return;
+    }
+
+    // Use an appropriate method to get ConsumerGoogleMap with the correct parameters
+    try {
+      // ConsumerMapView is typically provided by the Fleet Engine SDK
+      ConsumerMapView consumerMapView = new ConsumerMapView(activity);
+      mapContainer.addView(consumerMapView, new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams.MATCH_PARENT,
+        FrameLayout.LayoutParams.MATCH_PARENT));
+
+      // Get the consumer map asynchronously - must provide FragmentActivity and options
+      if (activity instanceof FragmentActivity) {
+        consumerMapView.getConsumerGoogleMapAsync(
+          new ConsumerGoogleMap.ConsumerMapReadyCallback() {
+            @Override
+            public void onConsumerMapReady(@NonNull ConsumerGoogleMap map) {
+              consumerGoogleMap = map;
+              consumerController = map.getConsumerController();
+
+              // Send status update event to React Native
+              WritableMap params = Arguments.createMap();
+              params.putBoolean("isReady", true);
+              sendEvent("consumerMapReady", params);
+
+              promise.resolve(true);
+            }
+          },
+          (FragmentActivity) activity,  // Must cast to FragmentActivity
+          null  // GoogleMapOptions or null
+        );
+      } else {
+        promise.reject("ACTIVITY_ERROR", "Activity is not a FragmentActivity");
       }
-    );
+    } catch (Exception e) {
+      Log.e(TAG, "Error initializing consumer map", e);
+      promise.reject("INIT_ERROR", "Failed to initialize consumer map: " + e.getMessage(), e);
+    }
   }
 
   /**
